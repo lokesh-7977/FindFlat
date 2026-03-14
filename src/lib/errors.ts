@@ -32,9 +32,40 @@ export class TokenReuseError extends AppError {
   }
 }
 
+export class ForbiddenError extends AppError {
+  constructor(message = "Forbidden") {
+    super(message, 403, "FORBIDDEN");
+    this.name = "ForbiddenError";
+  }
+}
+
+export class ConflictError extends AppError {
+  constructor(message = "Resource already exists") {
+    super(message, 409, "CONFLICT");
+    this.name = "ConflictError";
+  }
+}
+
 export class SessionExpiredError extends AppError {
   constructor() {
     super("Session expired", 401, "SESSION_EXPIRED");
     this.name = "SessionExpiredError";
+  }
+}
+
+export class BadRequestError extends AppError {
+  constructor(message = "Bad request") {
+    super(message, 400, "BAD_REQUEST");
+    this.name = "BadRequestError";
+  }
+}
+
+export class ValidationError extends AppError {
+  constructor(
+    message = "Validation failed",
+    public readonly issues?: Record<string, unknown>,
+  ) {
+    super(message, 422, "VALIDATION_ERROR");
+    this.name = "ValidationError";
   }
 }
