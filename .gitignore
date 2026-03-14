@@ -13,7 +13,7 @@ build/
 out/
 
 # Drizzle — track migrations, ignore local metadata
-drizzle/meta/
+migrations/meta/
 
 # Logs
 *.log
