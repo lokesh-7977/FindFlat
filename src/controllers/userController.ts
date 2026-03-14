@@ -49,7 +49,7 @@ export async function getSessionsHandler(c: Context) {
 
 export async function revokeSessionHandler(c: Context) {
   const userId = c.get("userId");
-  const sessionId = c.req.param("id");
+  const sessionId = c.req.param("id") as string;
 
   if (!sessionId) throw new UnauthorizedError("Session ID required");
 
