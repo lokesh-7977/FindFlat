@@ -1,3 +1,4 @@
+import { swaggerUI } from "@hono/swagger-ui";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
@@ -5,8 +6,9 @@ import { secureHeaders } from "hono/secure-headers";
 import { ZodError, z } from "zod";
 import { config, IS_PROD } from "./config/env";
 import { pool } from "./db";
-import { AppError } from "./lib/errors";
+import { AppError, ValidationError } from "./lib/errors";
 import { logger } from "./lib/logger";
+import { openApiSpec } from "./lib/openapi";
 import { requestIdMiddleware } from "./middleware/requestIdMiddleware";
 import { apiRoutes } from "./routes/apiRoutes";
 import { authRoutes } from "./routes/authRoutes";
@@ -50,7 +52,10 @@ app.get("/health", async (c) => {
         environment: config.NODE_ENV,
         port: config.PORT,
         // Uptime % of last 24 h window — 100 if up ≥ 24 h, proportional if recently started
-        uptime: Math.min(100, Math.round(((Date.now() - SERVER_START) / (24 * 60 * 60 * 1000)) * 100)),
+        uptime: Math.min(
+          100,
+          Math.round(((Date.now() - SERVER_START) / (24 * 60 * 60 * 1000)) * 100),
+        ),
       },
       db: { status: dbStatus },
     },
@@ -67,6 +72,13 @@ app.onError((err, c) => {
 
   if (err instanceof ZodError) {
     return c.json({ error: "Validation failed", issues: z.treeifyError(err), requestId }, 400);
+  }
+
+  if (err instanceof ValidationError) {
+    return c.json(
+      { error: err.message, code: err.code, issues: err.issues, requestId },
+      err.statusCode,
+    );
   }
 
   if (err instanceof AppError) {
@@ -89,6 +101,9 @@ app.onError((err, c) => {
 });
 
 app.get("/", (c) => c.json({ name: "Flatme API", version: "1.0.0" }));
+
+app.get("/openapi.json", (c) => c.json(openApiSpec));
+app.get("/doc", swaggerUI({ url: "/openapi.json" }));
 
 app.route("/auth", authRoutes);
 app.route("/api", apiRoutes);
