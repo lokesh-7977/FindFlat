@@ -11,7 +11,7 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().default("*"),
   MAX_SESSIONS_PER_USER: z.coerce.number().int().min(1).max(20).default(5),
   DB_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
-  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  PORT: z.coerce.number().int().min(1).max(65535).default(5000),
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -1,13 +1,14 @@
 import type { Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import { uuidv7 } from "uuidv7";
-import { IS_PROD } from "../config/env";
+import { HTTPException } from "hono/http-exception";
+import { config, IS_PROD } from "../config/env";
 import { SessionExpiredError, TokenReuseError, UnauthorizedError } from "../lib/errors";
+import { createAuthUrl, exchangeCodeForUser, verifyState } from "../lib/googleOAuth";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../lib/jwt";
 import { logger } from "../lib/logger";
+import { snowflakeId } from "../lib/snowflake";
 import { sessionRepository } from "../repositories/sessionRepository";
 import { userService } from "../services/userService";
-import type { GoogleUser } from "../types/authTypes";
 
 const COOKIE_BASE = {
   path: "/",
@@ -16,14 +17,37 @@ const COOKIE_BASE = {
   secure: IS_PROD,
 } as const;
 
-export async function googleAuthHandler(c: Context) {
-  return c.text("Redirecting to Google...", 302);
+export async function googleInitHandler(c: Context) {
+  const { url } = createAuthUrl(config.GOOGLE_CLIENT_ID, config.GOOGLE_REDIRECT_URI, [
+    "openid",
+    "email",
+    "profile",
+  ]);
+  return c.redirect(url);
 }
 
 export async function googleCallbackHandler(c: Context) {
-  const googleProfile = c.get("user-google") as GoogleUser | undefined;
+  const code = c.req.query("code");
+  const state = c.req.query("state");
 
-  if (!googleProfile) {
+  if (!code || !state) {
+    throw new UnauthorizedError("Missing code or state");
+  }
+
+  if (!verifyState(state)) {
+    throw new HTTPException(401, { message: "Invalid or expired state" });
+  }
+
+  let googleProfile: Awaited<ReturnType<typeof exchangeCodeForUser>>;
+  try {
+    googleProfile = await exchangeCodeForUser(
+      code,
+      config.GOOGLE_CLIENT_ID,
+      config.GOOGLE_CLIENT_SECRET,
+      config.GOOGLE_REDIRECT_URI,
+    );
+  } catch (err) {
+    logger.warn("Google token exchange failed", { error: (err as Error).message });
     throw new UnauthorizedError("Google login failed");
   }
 
@@ -32,7 +56,7 @@ export async function googleCallbackHandler(c: Context) {
     throw new UnauthorizedError("Google account email is not verified");
   }
 
-  const sessionId = uuidv7();
+  const sessionId = snowflakeId();
   const userAgent = c.req.header("user-agent");
   // Take only the first IP in a forwarded chain to prevent header spoofing
   const rawForwarded = c.req.header("x-forwarded-for");
