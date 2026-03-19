@@ -1,4 +1,3 @@
-import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
 import {
@@ -8,6 +7,7 @@ import {
   listServicesHandler,
   updateServiceHandler,
 } from "../controllers/serviceController";
+import { zValidator } from "../lib/response";
 
 export const serviceRoutes = new Hono();
 

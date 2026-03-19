@@ -1,4 +1,3 @@
-import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
 import {
@@ -8,6 +7,7 @@ import {
   listFlatsHandler,
   updateFlatHandler,
 } from "../controllers/flatController";
+import { zValidator } from "../lib/response";
 
 export const flatRoutes = new Hono();
 
