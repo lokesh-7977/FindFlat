@@ -1,38 +1,59 @@
-import { and, count, eq, ilike } from "drizzle-orm";
-import { uuidv7 } from "uuidv7";
+import { and, asc, count, desc, eq, ilike, or, type SQL } from "drizzle-orm";
 import { db } from "../db";
 import { type LocalService, localServicesTable, type NewLocalService } from "../db/services";
+import { snowflakeId } from "../lib/snowflake";
 
 function escapeLike(str: string): string {
   return str.replace(/%/g, "\\%").replace(/_/g, "\\_");
 }
 
 type ServiceType = LocalService["serviceType"];
+type ServiceSortBy = "createdAt" | "monthlyCharge" | "updatedAt";
+
+const SORT_FIELDS: Record<
+  ServiceSortBy,
+  | typeof localServicesTable.createdAt
+  | typeof localServicesTable.monthlyCharge
+  | typeof localServicesTable.updatedAt
+> = {
+  createdAt: localServicesTable.createdAt,
+  monthlyCharge: localServicesTable.monthlyCharge,
+  updatedAt: localServicesTable.updatedAt,
+};
 
 interface ServiceFilters {
   city?: string;
   locality?: string;
   serviceType?: ServiceType;
+  q?: string;
+  sortBy?: ServiceSortBy;
+  sortOrder?: "asc" | "desc";
 }
 
 export const serviceRepository = {
   async findAll(filters: ServiceFilters, limit: number, offset: number) {
     const conditions = [];
+    if (filters.q) {
+      const q = `%${escapeLike(filters.q)}%`;
+      conditions.push(
+        or(
+          ilike(localServicesTable.title, q),
+          ilike(localServicesTable.description, q),
+          ilike(localServicesTable.contactName, q),
+        ),
+      );
+    }
     if (filters.city) conditions.push(ilike(localServicesTable.city, filters.city));
     if (filters.locality) conditions.push(ilike(localServicesTable.locality, filters.locality));
     if (filters.serviceType)
       conditions.push(eq(localServicesTable.serviceType, filters.serviceType));
 
     const where = conditions.length ? and(...conditions) : undefined;
+    const sortCol = SORT_FIELDS[filters.sortBy ?? "createdAt"];
+    const order = filters.sortOrder === "asc" ? asc(sortCol) : desc(sortCol);
 
     const [data, total] = await Promise.all([
-      db
-        .select()
-        .from(localServicesTable)
-        .where(where)
-        .limit(limit)
-        .offset(offset)
-        .orderBy(localServicesTable.createdAt),
+      db.select().from(localServicesTable).where(where).orderBy(order).limit(limit).offset(offset),
       db.select({ count: count() }).from(localServicesTable).where(where),
     ]);
 
@@ -51,7 +72,7 @@ export const serviceRepository = {
   async create(data: Omit<NewLocalService, "id">): Promise<LocalService> {
     const result = await db
       .insert(localServicesTable)
-      .values({ ...data, id: uuidv7() })
+      .values({ ...data, id: snowflakeId() })
       .returning();
     return result[0];
   },
@@ -74,15 +95,17 @@ export const serviceRepository = {
   },
 
   async search(query: string, city?: string, limit = 20, offset = 0) {
-    const conditions = [ilike(localServicesTable.title, `%${escapeLike(query)}%`)];
+    const q = `%${escapeLike(query)}%`;
+    const conditions = [
+      or(ilike(localServicesTable.title, q), ilike(localServicesTable.description, q)) as SQL,
+    ];
     if (city) conditions.push(ilike(localServicesTable.city, city));
-    const where = and(...conditions);
     return db
       .select()
       .from(localServicesTable)
-      .where(where)
+      .where(and(...conditions))
+      .orderBy(desc(localServicesTable.createdAt))
       .limit(limit)
-      .offset(offset)
-      .orderBy(localServicesTable.createdAt);
+      .offset(offset);
   },
 };

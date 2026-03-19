@@ -1,11 +1,11 @@
-import { and, count, eq, gte, ilike, lte } from "drizzle-orm";
-import { uuidv7 } from "uuidv7";
+import { and, asc, count, desc, eq, gte, ilike, lte, or, type SQL } from "drizzle-orm";
 import { db } from "../db";
 import {
   type EquipmentListing,
   equipmentListingsTable,
   type NewEquipmentListing,
 } from "../db/equipment";
+import { snowflakeId } from "../lib/snowflake";
 
 function escapeLike(str: string): string {
   return str.replace(/%/g, "\\%").replace(/_/g, "\\_");
@@ -13,6 +13,18 @@ function escapeLike(str: string): string {
 
 type EquipmentCategory = EquipmentListing["category"];
 type EquipmentCondition = EquipmentListing["condition"];
+type EquipmentSortBy = "createdAt" | "price" | "updatedAt";
+
+const SORT_FIELDS: Record<
+  EquipmentSortBy,
+  | typeof equipmentListingsTable.createdAt
+  | typeof equipmentListingsTable.price
+  | typeof equipmentListingsTable.updatedAt
+> = {
+  createdAt: equipmentListingsTable.createdAt,
+  price: equipmentListingsTable.price,
+  updatedAt: equipmentListingsTable.updatedAt,
+};
 
 interface EquipmentFilters {
   city?: string;
@@ -20,11 +32,20 @@ interface EquipmentFilters {
   condition?: EquipmentCondition;
   minPrice?: number;
   maxPrice?: number;
+  q?: string;
+  sortBy?: EquipmentSortBy;
+  sortOrder?: "asc" | "desc";
 }
 
 export const equipmentRepository = {
   async findAll(filters: EquipmentFilters, limit: number, offset: number) {
     const conditions = [];
+    if (filters.q) {
+      const q = `%${escapeLike(filters.q)}%`;
+      conditions.push(
+        or(ilike(equipmentListingsTable.title, q), ilike(equipmentListingsTable.description, q)),
+      );
+    }
     if (filters.city) conditions.push(ilike(equipmentListingsTable.city, filters.city));
     if (filters.category) conditions.push(eq(equipmentListingsTable.category, filters.category));
     if (filters.condition) conditions.push(eq(equipmentListingsTable.condition, filters.condition));
@@ -34,15 +55,17 @@ export const equipmentRepository = {
       conditions.push(lte(equipmentListingsTable.price, filters.maxPrice));
 
     const where = conditions.length ? and(...conditions) : undefined;
+    const sortCol = SORT_FIELDS[filters.sortBy ?? "createdAt"];
+    const order = filters.sortOrder === "asc" ? asc(sortCol) : desc(sortCol);
 
     const [data, total] = await Promise.all([
       db
         .select()
         .from(equipmentListingsTable)
         .where(where)
+        .orderBy(order)
         .limit(limit)
-        .offset(offset)
-        .orderBy(equipmentListingsTable.createdAt),
+        .offset(offset),
       db.select({ count: count() }).from(equipmentListingsTable).where(where),
     ]);
 
@@ -61,7 +84,7 @@ export const equipmentRepository = {
   async create(data: Omit<NewEquipmentListing, "id">): Promise<EquipmentListing> {
     const result = await db
       .insert(equipmentListingsTable)
-      .values({ ...data, id: uuidv7() })
+      .values({ ...data, id: snowflakeId() })
       .returning();
     return result[0];
   },
@@ -87,15 +110,20 @@ export const equipmentRepository = {
   },
 
   async search(query: string, city?: string, limit = 20, offset = 0) {
-    const conditions = [ilike(equipmentListingsTable.title, `%${escapeLike(query)}%`)];
+    const q = `%${escapeLike(query)}%`;
+    const conditions = [
+      or(
+        ilike(equipmentListingsTable.title, q),
+        ilike(equipmentListingsTable.description, q),
+      ) as SQL,
+    ];
     if (city) conditions.push(ilike(equipmentListingsTable.city, city));
-    const where = and(...conditions);
     return db
       .select()
       .from(equipmentListingsTable)
-      .where(where)
+      .where(and(...conditions))
+      .orderBy(desc(equipmentListingsTable.createdAt))
       .limit(limit)
-      .offset(offset)
-      .orderBy(equipmentListingsTable.createdAt);
+      .offset(offset);
   },
 };

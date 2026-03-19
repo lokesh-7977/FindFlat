@@ -1,9 +1,9 @@
 import { and, asc, desc, eq, inArray, lt, ne } from "drizzle-orm";
-import { uuidv7 } from "uuidv7";
 import { config } from "../config/env";
 import type { Session } from "../db";
 import { db, sessionsTable } from "../db";
 import { hashToken } from "../lib/hash";
+import { snowflakeId } from "../lib/snowflake";
 
 export const sessionRepository = {
   async createSession(
@@ -15,7 +15,7 @@ export const sessionRepository = {
       ipAddress?: string;
     },
   ): Promise<Session> {
-    const sessionId = metadata?.sessionId ?? uuidv7();
+    const sessionId = metadata?.sessionId ?? snowflakeId();
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 30);
 

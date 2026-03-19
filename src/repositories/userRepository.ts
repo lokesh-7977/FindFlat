@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
-import { uuidv7 } from "uuidv7";
 import type { User } from "../db";
 import { db, usersTable } from "../db";
+import { snowflakeId } from "../lib/snowflake";
 
 export type UpdateUserInput = Partial<Pick<User, "name" | "city" | "photo" | "gender">>;
 
@@ -17,7 +17,7 @@ export const userRepository = {
   },
 
   async createWithGoogleSub(profile: { id: string; name: string; email: string }): Promise<User> {
-    const userId = uuidv7();
+    const userId = snowflakeId();
 
     const result = await db
       .insert(usersTable)
