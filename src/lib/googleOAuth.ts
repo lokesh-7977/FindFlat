@@ -1,12 +1,13 @@
+import { randomBytes } from "node:crypto";
 import type { GoogleUser } from "../types/authTypes";
 
 // In-memory state store — maps state → expiry timestamp
 const stateStore = new Map<string, number>();
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
+/** Generate a cryptographically secure random state string. */
 function generateState(): string {
-  const rand = () => Math.random().toString(36).substring(2);
-  return `${rand()}-${rand()}-${rand()}`;
+  return randomBytes(24).toString("base64url");
 }
 
 export function createAuthUrl(
@@ -53,20 +54,23 @@ export async function exchangeCodeForUser(
       redirect_uri: redirectUri,
       grant_type: "authorization_code",
     }),
-  }).then((r) => r.json());
+  }).then((r) => r.json() as Promise<Record<string, unknown>>);
 
   if ("error" in tokenRes) {
-    console.error("Google token error:", JSON.stringify(tokenRes));
-    throw new Error(tokenRes.error_description ?? tokenRes.error);
+    throw new Error(String(tokenRes.error_description ?? tokenRes.error));
   }
+
+  const accessToken = tokenRes.access_token as string;
 
   const userRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
-    headers: { authorization: `Bearer ${tokenRes.access_token}` },
-  }).then((r) => r.json());
+    headers: { authorization: `Bearer ${accessToken}` },
+  }).then((r) => r.json() as Promise<Record<string, unknown>>);
 
   if ("error" in userRes) {
-    throw new Error(userRes.error?.message ?? "Failed to fetch Google user");
+    const errMsg =
+      (userRes.error as Record<string, unknown>)?.message ?? "Failed to fetch Google user";
+    throw new Error(String(errMsg));
   }
 
-  return userRes as GoogleUser;
+  return userRes as unknown as GoogleUser;
 }

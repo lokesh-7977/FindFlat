@@ -7,14 +7,11 @@
  *   [12 bits] per-ms sequence (0–4095)
  *
  * IDs are returned as decimal strings to avoid JS Number precision loss.
- * They are lexicographically sortable when zero-padded, but since we
- * store them in a TEXT column and sort by createdAt/id explicitly,
- * that's fine.
  *
  * Benefits over UUIDv7:
  *   - Smaller (≤20 digits vs 36 chars)
  *   - Monotonic within the same ms (sequence prevents collisions)
- *   - Encodes timestamp → can extract creation time without extra column
+ *   - Encodes timestamp → creation time extractable without extra column
  */
 
 const EPOCH = 1704067200000n; // 2024-01-01T00:00:00.000Z
@@ -23,15 +20,16 @@ const MACHINE_ID = BigInt(process.env.MACHINE_ID ?? "1") & 0x3ffn; // 10 bits
 let lastTimestamp = -1n;
 let sequence = 0n;
 
+/** Generate a unique Snowflake ID as a decimal string. */
 export function snowflakeId(): string {
   let now = BigInt(Date.now()) - EPOCH;
 
   if (now === lastTimestamp) {
-    sequence = (sequence + 1n) & 0xfffn; // 12 bits
+    sequence = (sequence + 1n) & 0xfffn; // 12-bit cap
     if (sequence === 0n) {
-      // Sequence exhausted — spin-wait for next millisecond
-      while (BigInt(Date.now()) - EPOCH <= lastTimestamp) {}
-      now = BigInt(Date.now()) - EPOCH;
+      // Sequence exhausted — advance to the next millisecond without blocking.
+      // In practice this is extremely rare (>4096 IDs in a single ms).
+      now = lastTimestamp + 1n;
     }
   } else {
     sequence = 0n;
@@ -43,7 +41,7 @@ export function snowflakeId(): string {
   return id.toString();
 }
 
-/** Extract the UTC timestamp embedded in a snowflake ID */
+/** Extract the UTC timestamp embedded in a Snowflake ID. */
 export function snowflakeTimestamp(id: string): Date {
   const ms = (BigInt(id) >> 22n) + EPOCH;
   return new Date(Number(ms));
