@@ -53,7 +53,7 @@ export function rateLimit(opts: RateLimitOptions) {
 
     if (entry.count > limit) {
       c.header("Retry-After", String(resetSecs));
-      return c.json({ error: message, code: "RATE_LIMITED" }, 429);
+      return c.json({ status: "error", message, code: "RATE_LIMITED" }, 429);
     }
 
     await next();
