@@ -6,6 +6,7 @@ export {};
 declare module "hono" {
   interface ContextVariableMap {
     userId: string;
+    sessionId: string;
     requestId: string;
   }
 }

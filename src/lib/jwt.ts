@@ -3,16 +3,16 @@ import { config } from "../config/env";
 
 const JWT_SECRET = new TextEncoder().encode(config.JWT_SECRET);
 
-// Access token: 15 minutes
-export async function signAccessToken(userId: string): Promise<string> {
-  return new SignJWT({ userId, type: "access" })
+/** Access token: 15 minutes. Includes sessionId so the current session can be identified. */
+export async function signAccessToken(userId: string, sessionId: string): Promise<string> {
+  return new SignJWT({ userId, sessionId, type: "access" })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("15m")
     .sign(JWT_SECRET);
 }
 
-// Refresh token: 30 days
+/** Refresh token: 30 days. */
 export async function signRefreshToken(userId: string, sessionId: string): Promise<string> {
   return new SignJWT({ userId, sessionId, type: "refresh" })
     .setProtectedHeader({ alg: "HS256" })
@@ -21,10 +21,15 @@ export async function signRefreshToken(userId: string, sessionId: string): Promi
     .sign(JWT_SECRET);
 }
 
-export async function verifyAccessToken(token: string): Promise<{ userId: string }> {
+export async function verifyAccessToken(
+  token: string,
+): Promise<{ userId: string; sessionId: string }> {
   const { payload } = await jwtVerify(token, JWT_SECRET);
   if (payload.type !== "access") throw new Error("Invalid token type");
-  return { userId: payload.userId as string };
+  return {
+    userId: payload.userId as string,
+    sessionId: payload.sessionId as string,
+  };
 }
 
 export async function verifyRefreshToken(
