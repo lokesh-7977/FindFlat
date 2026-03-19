@@ -6,6 +6,7 @@ import { SessionExpiredError, TokenReuseError, UnauthorizedError } from "../lib/
 import { createAuthUrl, exchangeCodeForUser, verifyState } from "../lib/googleOAuth";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../lib/jwt";
 import { logger } from "../lib/logger";
+import { ok } from "../lib/response";
 import { snowflakeId } from "../lib/snowflake";
 import { sessionRepository } from "../repositories/sessionRepository";
 import { userService } from "../services/userService";
@@ -51,21 +52,19 @@ export async function googleCallbackHandler(c: Context) {
     throw new UnauthorizedError("Google login failed");
   }
 
-  // Reject unverified Google accounts
   if (googleProfile.verified_email === false) {
     throw new UnauthorizedError("Google account email is not verified");
   }
 
   const sessionId = snowflakeId();
   const userAgent = c.req.header("user-agent");
-  // Take only the first IP in a forwarded chain to prevent header spoofing
   const rawForwarded = c.req.header("x-forwarded-for");
   const ipAddress = rawForwarded?.split(",")[0]?.trim() ?? c.req.header("x-real-ip");
 
   const user = await userService.getOrCreateFromGoogleProfile(googleProfile);
 
   const [accessToken, refreshToken] = await Promise.all([
-    signAccessToken(user.id),
+    signAccessToken(user.id, sessionId),
     signRefreshToken(user.id, sessionId),
   ]);
 
@@ -92,8 +91,6 @@ export async function googleCallbackHandler(c: Context) {
 export async function refreshTokenHandler(c: Context) {
   const refreshToken = getCookie(c, "refreshToken");
 
-  // zValidator("cookie") on the route guarantees this is present, but we guard
-  // here too so the type is narrowed without a non-null assertion.
   if (!refreshToken) {
     throw new UnauthorizedError("No refresh token");
   }
@@ -107,40 +104,47 @@ export async function refreshTokenHandler(c: Context) {
     throw new UnauthorizedError("Invalid refresh token");
   }
 
+  // Check session expiry BEFORE rotating the token
+  const session = await sessionRepository.findSessionById(sessionId);
+
+  if (!session) {
+    throw new UnauthorizedError("Session not found");
+  }
+
+  if (new Date() > new Date(session.expiresAt)) {
+    await sessionRepository.deleteSession(sessionId);
+    deleteCookie(c, "refreshToken", { path: "/" });
+    throw new SessionExpiredError();
+  }
+
   const [newAccessToken, newRefreshToken] = await Promise.all([
-    signAccessToken(userId),
+    signAccessToken(userId, sessionId),
     signRefreshToken(userId, sessionId),
   ]);
 
-  const session = await sessionRepository.rotateRefreshToken(
+  const rotated = await sessionRepository.rotateRefreshToken(
     sessionId,
     refreshToken,
     newRefreshToken,
   );
 
-  if (!session) {
+  if (!rotated) {
     logger.warn("Token reuse detected — revoking all user sessions", { userId, sessionId });
     sessionRepository.deleteUserSessions(userId).catch(() => {});
     throw new TokenReuseError();
   }
 
-  if (new Date() > new Date(session.expiresAt)) {
-    sessionRepository.deleteSession(sessionId).catch(() => {});
-    deleteCookie(c, "refreshToken", { path: "/" });
-    throw new SessionExpiredError();
-  }
-
   setCookie(c, "accessToken", newAccessToken, { ...COOKIE_BASE, maxAge: 15 * 60 });
   setCookie(c, "refreshToken", newRefreshToken, { ...COOKIE_BASE, maxAge: 30 * 24 * 60 * 60 });
 
-  return c.json({ ok: true });
+  return c.json(ok(null, "Token refreshed"));
 }
 
 export async function logoutHandler(c: Context) {
   const refreshToken = getCookie(c, "refreshToken");
 
   if (!refreshToken) {
-    return c.json({ message: "Already logged out" });
+    return c.json(ok(null, "Already logged out"));
   }
 
   try {
@@ -148,11 +152,11 @@ export async function logoutHandler(c: Context) {
     logger.info("User logged out", { userId, sessionId });
     sessionRepository.deleteSession(sessionId).catch(() => {});
   } catch {
-    // Invalid token — still clear cookies below
+    // Invalid token — still clear cookies
   }
 
   deleteCookie(c, "accessToken", { path: "/" });
   deleteCookie(c, "refreshToken", { path: "/" });
 
-  return c.json({ message: "Logged out successfully" });
+  return c.json(ok(null, "Logged out successfully"));
 }

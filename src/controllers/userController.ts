@@ -3,9 +3,16 @@ import { NotFoundError, UnauthorizedError } from "../lib/errors";
 import { deleted, ok } from "../lib/response";
 import { userService } from "../services/userService";
 
+// Matches the updateProfileSchema in apiRoutes.ts
+type UpdateProfileBody = {
+  name?: string;
+  city?: string;
+  photo?: string;
+  gender?: "male" | "female" | "other";
+};
+
 export async function getMeHandler(c: Context) {
   const userId = c.get("userId");
-
   const user = await userService.getById(userId);
   if (!user) throw new NotFoundError("User not found");
 
@@ -15,12 +22,7 @@ export async function getMeHandler(c: Context) {
 
 export async function updateMeHandler(c: Context) {
   const userId = c.get("userId");
-  const body = c.req.valid("json" as never) as {
-    name?: string;
-    city?: string;
-    photo?: string;
-    gender?: "male" | "female" | "other";
-  };
+  const body = c.req.valid("json") as UpdateProfileBody;
 
   const updated = await userService.updateProfile(userId, body);
   if (!updated) throw new NotFoundError("User not found");
@@ -31,26 +33,26 @@ export async function updateMeHandler(c: Context) {
 
 export async function getSessionsHandler(c: Context) {
   const userId = c.get("userId");
-  const currentSessionId = c.get("sessionId" as never) as string | undefined;
+  const currentSessionId = c.get("sessionId");
 
   const sessions = await userService.getSessions(userId);
 
-  const safe = sessions.map((s) => ({
+  const data = sessions.map((s) => ({
     id: s.id,
     userAgent: s.userAgent,
     ipAddress: s.ipAddress,
     createdAt: s.createdAt,
     lastUsedAt: s.lastUsedAt,
     expiresAt: s.expiresAt,
-    isCurrent: currentSessionId ? s.id === currentSessionId : undefined,
+    isCurrent: s.id === currentSessionId,
   }));
 
-  return c.json(ok(safe, "Active sessions"));
+  return c.json(ok(data, "Active sessions"));
 }
 
 export async function revokeSessionHandler(c: Context) {
   const userId = c.get("userId");
-  const sessionId = c.req.param("id") as string;
+  const sessionId = c.req.param("id");
 
   if (!sessionId) throw new UnauthorizedError("Session ID required");
 

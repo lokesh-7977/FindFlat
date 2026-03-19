@@ -1,4 +1,3 @@
-import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
 import {
@@ -7,6 +6,7 @@ import {
   revokeSessionHandler,
   updateMeHandler,
 } from "../controllers/userController";
+import { zValidator } from "../lib/response";
 import { authMiddleware } from "../middleware/authMiddleware";
 import { equipmentRoutes } from "./equipmentRoutes";
 import { eventRoutes } from "./eventRoutes";
