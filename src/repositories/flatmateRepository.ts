@@ -5,11 +5,8 @@ import {
   flatmateProfilesTable,
   type NewFlatmateProfile,
 } from "../db/flatmates";
+import { likePattern } from "../lib/db";
 import { snowflakeId } from "../lib/snowflake";
-
-function escapeLike(str: string): string {
-  return str.replace(/%/g, "\\%").replace(/_/g, "\\_");
-}
 
 type FlatmateSortBy = "createdAt" | "budget" | "updatedAt";
 
@@ -36,15 +33,16 @@ interface FlatmateFilters {
 
 export const flatmateRepository = {
   async findAll(filters: FlatmateFilters, limit: number, offset: number) {
-    const conditions = [];
+    const conditions: SQL[] = [];
+
     if (filters.q) {
-      const q = `%${escapeLike(filters.q)}%`;
+      const q = likePattern(filters.q);
       conditions.push(
         or(
           ilike(flatmateProfilesTable.description, q),
           ilike(flatmateProfilesTable.occupation, q),
           ilike(flatmateProfilesTable.locality, q),
-        ),
+        ) as SQL,
       );
     }
     if (filters.city) conditions.push(ilike(flatmateProfilesTable.city, filters.city));
@@ -58,7 +56,7 @@ export const flatmateRepository = {
     const sortCol = SORT_FIELDS[filters.sortBy ?? "createdAt"];
     const order = filters.sortOrder === "asc" ? asc(sortCol) : desc(sortCol);
 
-    const [data, total] = await Promise.all([
+    const [data, [{ count: total }]] = await Promise.all([
       db
         .select()
         .from(flatmateProfilesTable)
@@ -69,65 +67,68 @@ export const flatmateRepository = {
       db.select({ count: count() }).from(flatmateProfilesTable).where(where),
     ]);
 
-    return { data, total: total[0].count };
+    return { data, total };
   },
 
   async findById(id: string): Promise<FlatmateProfile | undefined> {
-    const result = await db
+    const [row] = await db
       .select()
       .from(flatmateProfilesTable)
       .where(eq(flatmateProfilesTable.id, id))
       .limit(1);
-    return result[0];
+    return row;
   },
 
   async findByUserId(userId: string): Promise<FlatmateProfile | undefined> {
-    const result = await db
+    const [row] = await db
       .select()
       .from(flatmateProfilesTable)
       .where(eq(flatmateProfilesTable.postedBy, userId))
       .limit(1);
-    return result[0];
+    return row;
   },
 
   async create(data: Omit<NewFlatmateProfile, "id">): Promise<FlatmateProfile> {
-    const result = await db
+    const [row] = await db
       .insert(flatmateProfilesTable)
       .values({ ...data, id: snowflakeId() })
       .returning();
-    return result[0];
+    return row;
   },
 
   async updateByUserId(
     userId: string,
     data: Partial<NewFlatmateProfile>,
   ): Promise<FlatmateProfile | undefined> {
-    const result = await db
+    const [row] = await db
       .update(flatmateProfilesTable)
       .set({ ...data, updatedAt: new Date() })
       .where(eq(flatmateProfilesTable.postedBy, userId))
       .returning();
-    return result[0];
+    return row;
   },
 
   async deleteByUserId(userId: string): Promise<boolean> {
-    const result = await db
+    const rows = await db
       .delete(flatmateProfilesTable)
       .where(eq(flatmateProfilesTable.postedBy, userId))
-      .returning();
-    return result.length > 0;
+      .returning({ id: flatmateProfilesTable.id });
+    return rows.length > 0;
   },
 
-  async search(query: string, city?: string, limit = 20, offset = 0) {
-    const q = `%${escapeLike(query)}%`;
-    const conditions = [
+  async search(query: string, city?: string, limit = 20, offset = 0): Promise<FlatmateProfile[]> {
+    const q = likePattern(query);
+    const conditions: SQL[] = [
       or(
         ilike(flatmateProfilesTable.description, q),
         ilike(flatmateProfilesTable.occupation, q),
         ilike(flatmateProfilesTable.city, q),
       ) as SQL,
     ];
+    // Note: city filter is already included in the or() above via city search,
+    // but if an explicit city filter is provided, we narrow to exact city match.
     if (city) conditions.push(ilike(flatmateProfilesTable.city, city));
+
     return db
       .select()
       .from(flatmateProfilesTable)

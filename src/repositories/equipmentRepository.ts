@@ -5,11 +5,8 @@ import {
   equipmentListingsTable,
   type NewEquipmentListing,
 } from "../db/equipment";
+import { likePattern } from "../lib/db";
 import { snowflakeId } from "../lib/snowflake";
-
-function escapeLike(str: string): string {
-  return str.replace(/%/g, "\\%").replace(/_/g, "\\_");
-}
 
 type EquipmentCategory = EquipmentListing["category"];
 type EquipmentCondition = EquipmentListing["condition"];
@@ -39,11 +36,15 @@ interface EquipmentFilters {
 
 export const equipmentRepository = {
   async findAll(filters: EquipmentFilters, limit: number, offset: number) {
-    const conditions = [];
+    const conditions: SQL[] = [];
+
     if (filters.q) {
-      const q = `%${escapeLike(filters.q)}%`;
+      const q = likePattern(filters.q);
       conditions.push(
-        or(ilike(equipmentListingsTable.title, q), ilike(equipmentListingsTable.description, q)),
+        or(
+          ilike(equipmentListingsTable.title, q),
+          ilike(equipmentListingsTable.description, q),
+        ) as SQL,
       );
     }
     if (filters.city) conditions.push(ilike(equipmentListingsTable.city, filters.city));
@@ -58,7 +59,7 @@ export const equipmentRepository = {
     const sortCol = SORT_FIELDS[filters.sortBy ?? "createdAt"];
     const order = filters.sortOrder === "asc" ? asc(sortCol) : desc(sortCol);
 
-    const [data, total] = await Promise.all([
+    const [data, [{ count: total }]] = await Promise.all([
       db
         .select()
         .from(equipmentListingsTable)
@@ -69,55 +70,56 @@ export const equipmentRepository = {
       db.select({ count: count() }).from(equipmentListingsTable).where(where),
     ]);
 
-    return { data, total: total[0].count };
+    return { data, total };
   },
 
   async findById(id: string): Promise<EquipmentListing | undefined> {
-    const result = await db
+    const [row] = await db
       .select()
       .from(equipmentListingsTable)
       .where(eq(equipmentListingsTable.id, id))
       .limit(1);
-    return result[0];
+    return row;
   },
 
   async create(data: Omit<NewEquipmentListing, "id">): Promise<EquipmentListing> {
-    const result = await db
+    const [row] = await db
       .insert(equipmentListingsTable)
       .values({ ...data, id: snowflakeId() })
       .returning();
-    return result[0];
+    return row;
   },
 
   async updateById(
     id: string,
     data: Partial<NewEquipmentListing>,
   ): Promise<EquipmentListing | undefined> {
-    const result = await db
+    const [row] = await db
       .update(equipmentListingsTable)
       .set({ ...data, updatedAt: new Date() })
       .where(eq(equipmentListingsTable.id, id))
       .returning();
-    return result[0];
+    return row;
   },
 
   async deleteById(id: string): Promise<boolean> {
-    const result = await db
+    const rows = await db
       .delete(equipmentListingsTable)
       .where(eq(equipmentListingsTable.id, id))
-      .returning();
-    return result.length > 0;
+      .returning({ id: equipmentListingsTable.id });
+    return rows.length > 0;
   },
 
-  async search(query: string, city?: string, limit = 20, offset = 0) {
-    const q = `%${escapeLike(query)}%`;
-    const conditions = [
+  async search(query: string, city?: string, limit = 20, offset = 0): Promise<EquipmentListing[]> {
+    const q = likePattern(query);
+    const conditions: SQL[] = [
       or(
         ilike(equipmentListingsTable.title, q),
         ilike(equipmentListingsTable.description, q),
       ) as SQL,
     ];
     if (city) conditions.push(ilike(equipmentListingsTable.city, city));
+
     return db
       .select()
       .from(equipmentListingsTable)

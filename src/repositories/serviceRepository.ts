@@ -1,11 +1,8 @@
 import { and, asc, count, desc, eq, ilike, or, type SQL } from "drizzle-orm";
 import { db } from "../db";
 import { type LocalService, localServicesTable, type NewLocalService } from "../db/services";
+import { likePattern } from "../lib/db";
 import { snowflakeId } from "../lib/snowflake";
-
-function escapeLike(str: string): string {
-  return str.replace(/%/g, "\\%").replace(/_/g, "\\_");
-}
 
 type ServiceType = LocalService["serviceType"];
 type ServiceSortBy = "createdAt" | "monthlyCharge" | "updatedAt";
@@ -32,15 +29,16 @@ interface ServiceFilters {
 
 export const serviceRepository = {
   async findAll(filters: ServiceFilters, limit: number, offset: number) {
-    const conditions = [];
+    const conditions: SQL[] = [];
+
     if (filters.q) {
-      const q = `%${escapeLike(filters.q)}%`;
+      const q = likePattern(filters.q);
       conditions.push(
         or(
           ilike(localServicesTable.title, q),
           ilike(localServicesTable.description, q),
           ilike(localServicesTable.contactName, q),
-        ),
+        ) as SQL,
       );
     }
     if (filters.city) conditions.push(ilike(localServicesTable.city, filters.city));
@@ -52,54 +50,55 @@ export const serviceRepository = {
     const sortCol = SORT_FIELDS[filters.sortBy ?? "createdAt"];
     const order = filters.sortOrder === "asc" ? asc(sortCol) : desc(sortCol);
 
-    const [data, total] = await Promise.all([
+    const [data, [{ count: total }]] = await Promise.all([
       db.select().from(localServicesTable).where(where).orderBy(order).limit(limit).offset(offset),
       db.select({ count: count() }).from(localServicesTable).where(where),
     ]);
 
-    return { data, total: total[0].count };
+    return { data, total };
   },
 
   async findById(id: string): Promise<LocalService | undefined> {
-    const result = await db
+    const [row] = await db
       .select()
       .from(localServicesTable)
       .where(eq(localServicesTable.id, id))
       .limit(1);
-    return result[0];
+    return row;
   },
 
   async create(data: Omit<NewLocalService, "id">): Promise<LocalService> {
-    const result = await db
+    const [row] = await db
       .insert(localServicesTable)
       .values({ ...data, id: snowflakeId() })
       .returning();
-    return result[0];
+    return row;
   },
 
   async updateById(id: string, data: Partial<NewLocalService>): Promise<LocalService | undefined> {
-    const result = await db
+    const [row] = await db
       .update(localServicesTable)
       .set({ ...data, updatedAt: new Date() })
       .where(eq(localServicesTable.id, id))
       .returning();
-    return result[0];
+    return row;
   },
 
   async deleteById(id: string): Promise<boolean> {
-    const result = await db
+    const rows = await db
       .delete(localServicesTable)
       .where(eq(localServicesTable.id, id))
-      .returning();
-    return result.length > 0;
+      .returning({ id: localServicesTable.id });
+    return rows.length > 0;
   },
 
-  async search(query: string, city?: string, limit = 20, offset = 0) {
-    const q = `%${escapeLike(query)}%`;
-    const conditions = [
+  async search(query: string, city?: string, limit = 20, offset = 0): Promise<LocalService[]> {
+    const q = likePattern(query);
+    const conditions: SQL[] = [
       or(ilike(localServicesTable.title, q), ilike(localServicesTable.description, q)) as SQL,
     ];
     if (city) conditions.push(ilike(localServicesTable.city, city));
+
     return db
       .select()
       .from(localServicesTable)
